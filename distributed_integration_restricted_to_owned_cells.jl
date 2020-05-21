@@ -1,12 +1,14 @@
 
 using Gridap
+using Gridap.FESpaces
 using GridapDistributed
+using GridapDistributed: DistributedFESpace
+using GridapDistributed: DistributedAssemblyStrategy
 using SparseArrays
 
-function compute_subdomain_graph_distributed_index_set(space,dIJV)
+function compute_subdomain_graph_dIS_and_lst_snd(space,dI)
   # List parts I have to send data to
-  function compute_lst_snd(part, gids, IJV)
-    I,_,_ = IJV
+  function compute_lst_snd(part, gids, I)
     lst_snd = Set{Int}()
     for i = 1:length(I)
       owner = gids.lid_to_owner[I[i]]
@@ -19,7 +21,7 @@ function compute_subdomain_graph_distributed_index_set(space,dIJV)
     collect(lst_snd)
   end
 
-  part_to_lst_snd = DistributedData(compute_lst_snd, space.gids, dIJV)
+  part_to_lst_snd = DistributedData(compute_lst_snd, space.gids, dI)
   part_to_num_snd = DistributedData(part_to_lst_snd) do part, lst_snd
     length(lst_snd)
   end
@@ -128,7 +130,7 @@ end
     IndexSet(num_edges, lid_to_gid, lid_to_owner)
   end
 
-  DistributedIndexSet(
+  (DistributedIndexSet(
     compute_subdomain_graph_index_set,
     get_comm(space.model),
     num_edges,
@@ -137,7 +139,136 @@ end
     space.spaces,
     part_to_cell_to_edge_gids,
     part_to_owned_subdomain_graph_edge_gids,
+  ), part_to_lst_snd)
+end
+
+struct DistributedSparseMatrixAssemblerFullyAssembled{GM,GV,LM,LV} <: Assembler
+  global_matrix_type :: Type{GM}
+  global_vector_type :: Type{GV}
+  local_matrix_type  :: Type{LM}
+  local_vector_type  :: Type{LV}
+  trial              :: GridapDistributed.DistributedFESpace
+  test               :: GridapDistributed.DistributedFESpace
+  assems             :: DistributedData{<:Assembler}
+  strategy           :: DistributedAssemblyStrategy
+end
+
+
+function GridapDistributed.get_distributed_data(dassem::DistributedSparseMatrixAssemblerFullyAssembled)
+  dassem.assems
+end
+
+function Gridap.FESpaces.SparseMatrixAssembler(
+  global_matrix_type::Type,
+  global_vector_type::Type,
+  local_matrix_type::Type,
+  local_vector_type::Type,
+  dtrial::DistributedFESpace,
+  dtest::DistributedFESpace,
+  dstrategy::DistributedAssemblyStrategy,
+)
+
+  assems = DistributedData(
+    dtrial.spaces,
+    dtest.spaces,
+    dstrategy,
+  ) do part, U, V, strategy
+    SparseMatrixAssembler(local_matrix_type, local_vector_type, U, V, strategy)
+  end
+
+  DistributedSparseMatrixAssemblerFullyAssembled(
+    global_matrix_type,
+    global_vector_type,
+    local_matrix_type,
+    local_vector_type,
+    dtrial,
+    dtest,
+    assems,
+    dstrategy,
   )
+end
+
+
+function Gridap.FESpaces.assemble_matrix_and_vector(dassem::DistributedSparseMatrixAssemblerFullyAssembled,ddata)
+   # 1. Compute local portions
+   # 2. Determine communication pattern
+   # 3. Communicate entries
+   # 4. Combine local + remote entries
+   # 5. sparse_from_coo local portions
+   # 6. combine sparse_from_coo local portions into global data structure
+
+   # 1.
+   dIJVb = DistributedData(dassem.assems,ddata) do part, assem, data
+      trial = assem.trial
+      test =  assem.test
+      b = Gridap.Algebra.allocate_vector(assem,data)
+      n = Gridap.FESpaces.count_matrix_and_vector_nnz_coo(assem,data)
+      I,J,V = Gridap.FESpaces.allocate_coo_vectors(Gridap.FESpaces.get_matrix_type(assem),n)
+      Gridap.FESpaces.fill_matrix_and_vector_coo_numeric!(I,J,V,b,assem,data)
+      Gridap.FESpaces.finalize_coo!(I,J,V,num_free_dofs(test),num_free_dofs(test))
+      (I,J,V,b)
+   end
+
+   # 2.
+   dI = DistributedData(dIJVb) do part, IJVb
+     first(IJVb)
+   end
+   dIS,part_to_lst_snd = compute_subdomain_graph_dIS_and_lst_snd(dassem.test, dI)
+
+   # 3.
+   entries_exchange_vector=DistributedVector(dIS,dIS,part_to_lst_snd,dassem.test,dassem.trial,dIJVb) do part,IS,lst_snd,(test,test_gids),(trial,trial_gids),IJVb
+        lpart=fill(([],[],[],[],[]), length(IS.lid_to_gid) )
+        I,J,V,b = IJVb
+        for i=1:length(I)
+             owner = test_gids.lid_to_owner[I[i]]
+             if (owner != part)
+               edge_lid = findfirst( (i)->(i==owner), lst_snd )
+               push!(lpart[edge_lid][1],test_gids.lid_to_gid[I[i]])
+               push!(lpart[edge_lid][2],trial_gids.lid_to_gid[J[i]])
+               push!(lpart[edge_lid][3],V[i])
+             end
+        end
+        for i=1:length(b)
+             owner = test_gids.lid_to_owner[i]
+             if (owner != part)
+               edge_lid = findfirst( (i)->(i==owner), lst_snd )
+               if (edge_lid != nothing)
+                 push!(lpart[edge_lid][4],test_gids.lid_to_gid[i])
+                 push!(lpart[edge_lid][5],b[i])
+               end
+             end
+        end
+        lpart
+   end
+   exchange!(entries_exchange_vector)
+
+   # 4.
+   dIJVb = DistributedData(dIJVb, entries_exchange_vector, dIS, dassem.test, dassem.trial) do part, IJVb, remote_entries, IS, (test,test_gids), (trial,trial_gids)
+         I,J,V,b = IJVb
+         GI = eltype(I)[]
+         GJ = eltype(J)[]
+         GV = eltype(V)[]
+         for edge_lid=1:length(IS.lid_to_gid)
+            if (IS.lid_to_owner[edge_lid] != part)
+              for i=1:length(remote_entries[edge_lid][1])
+                push!(GI, remote_entries[edge_lid][1][i])
+                push!(GJ, remote_entries[edge_lid][2][i])
+                push!(GV,  remote_entries[edge_lid][3][i])
+              end
+              for i=1:length(remote_entries[edge_lid][4])
+                b[test_gids.gid_to_lid[remote_entries[edge_lid][4][i]]] += remote_entries[edge_lid][5][i]
+              end
+            end
+         end
+         GI,GJ,GV,b
+   end
+
+   # 5.
+   fully_assembled_local_portions = DistributedData(dassem,dIJVb) do part, assem, IJVb
+     A = sparse_from_coo(assem.matrix_type,I,J,V,m,n)
+     b = b[   test_gids.lid_to_owner[i]  ]
+   end
+
 end
 
 
@@ -145,8 +276,12 @@ end
 # Note that here we use serial vectors and matrices
 # but the assembly is distributed
 T = Float64
-vector_type = Vector{T}
-matrix_type = SparseMatrixCSC{T,Int}
+global_vector_type = Vector{T}
+global_matrix_type = SparseMatrixCSC{T,Int}
+
+local_vector_type = Vector{T}
+local_matrix_type = SparseMatrixCSR{1,T,Int}
+
 
 # Manufactured solution
 u(x) = x[1] + x[2]
@@ -162,7 +297,7 @@ model = CartesianDiscreteModel(comm,subdomains,domain,cells)
 # FE Spaces
 order = 1
 V = FESpace(
-  vector_type, valuetype=Float64, reffe=:Lagrangian, order=order,
+  global_vector_type, valuetype=Float64, reffe=:Lagrangian, order=order,
   model=model, conformity=:H1, dirichlet_tags="boundary")
 
 U = TrialFESpace(V,u)
@@ -186,24 +321,25 @@ end
 strategy = DistributedData(get_comm(model)) do part
    Gridap.FESpaces.DefaultAssemblyStrategy()
 end
-
-
 strategy = GridapDistributed.DistributedAssemblyStrategy(strategy)
 
-assem = Gridap.FESpaces.SparseMatrixAssembler(matrix_type, vector_type, U, V, strategy)
+assem = Gridap.FESpaces.SparseMatrixAssembler(
+  global_matrix_type,
+  global_vector_type,
+  local_matrix_type,
+  local_vector_type,
+  U,
+  V,
+  strategy,
+)
 
-dIJV = DistributedData(assem,terms) do part, assem, terms
+ddata = DistributedData(assem,terms) do part, assem, terms
    trial = assem.trial
    test =  assem.test
    u = Gridap.FESpaces.get_cell_basis(trial)
    v = Gridap.FESpaces.get_cell_basis(test)
    uhd = zero(trial)
-   b = Gridap.Algebra.allocate_vector(assem,nothing)
    data = Gridap.FESpaces.collect_cell_matrix_and_vector(uhd,u,v,terms)
-   n = Gridap.FESpaces.count_matrix_and_vector_nnz_coo(assem,data)
-   I,J,V = Gridap.FESpaces.allocate_coo_vectors(Gridap.FESpaces.get_matrix_type(assem),n)
-   Gridap.FESpaces.fill_matrix_and_vector_coo_numeric!(I,J,V,b,assem,data)
-   (I,J,V)
 end
 
-DIS = compute_subdomain_graph_distributed_index_set(V,dIJV)
+dIJVb=Gridap.FESpaces.assemble_matrix_and_vector(assem,ddata)
