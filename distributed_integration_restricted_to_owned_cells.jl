@@ -498,13 +498,31 @@ assem = Gridap.FESpaces.SparseMatrixAssembler(
   strategy,
 )
 
-ddata = DistributedData(assem, terms) do part, assem, terms
-  trial = assem.trial
-  test = assem.test
-  u = Gridap.FESpaces.get_cell_basis(trial)
-  v = Gridap.FESpaces.get_cell_basis(test)
-  uhd = zero(trial)
-  data = Gridap.FESpaces.collect_cell_matrix_and_vector(uhd, u, v, terms)
+# FE solution
+op = AffineFEOperator(assem,terms)
+uh = solve(op)
+
+# Error norms and print solution
+sums = DistributedData(model,uh) do part, (model,gids), uh
+
+  trian = Triangulation(model)
+
+  owned_trian = remove_ghost_cells(trian,part,gids)
+  owned_quad = CellQuadrature(owned_trian,2*order)
+  owned_uh = restrict(uh,owned_trian)
+
+  writevtk(owned_trian,"results_$part",cellfields=["uh"=>owned_uh])
+
+  e = u - owned_uh
+
+  l2(u) = u*u
+
+  sum(integrate(l2(e),owned_trian,owned_quad))
+
 end
 
-A,b = Gridap.FESpaces.assemble_matrix_and_vector(assem, ddata)
+e_l2 = sum(gather(sums))
+
+tol = 1.0e-9
+println(e_l2)
+println(e_l2 < tol)

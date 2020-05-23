@@ -1,5 +1,5 @@
 
-function Gridap.FESpaces.AffineFEOperator(dassem::DistributedAssembler, dterms)
+function Gridap.FESpaces.AffineFEOperator(dassem::Assembler, dterms)
 
   trial = dassem.trial
   test = dassem.test
@@ -22,4 +22,3 @@ function Gridap.FESpaces.FEOperator(assem::DistributedAssembler,terms::Distribut
   test = assem.test
   FEOperatorFromTerms(trial,test,assem,terms)
 end
-
