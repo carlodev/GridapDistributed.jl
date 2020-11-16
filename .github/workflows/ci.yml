@@ -3,13 +3,24 @@ on:
   - push 
 jobs:
   SequentialCommTests:
-    runs-on: ubuntu-latest 
+    name: SequentialCommTests ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }} 
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 1.4
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+          - x86   
     steps:
       - uses: actions/checkout@v2
       - uses: julia-actions/setup-julia@v1
         with:
-          version: 1.4
-          arch: x64 
+          version: ${{ matrix.version }} 
+          arch: ${{ matrix.arch }} 
       - uses: julia-actions/julia-buildpkg@latest
       - uses: julia-actions/julia-runtest@latest
   MPIPETScCommTests:
