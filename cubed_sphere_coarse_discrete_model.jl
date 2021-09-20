@@ -280,19 +280,19 @@ function (map::MapPanelαβ2xyz{T})(αβ) where T
 
   α,β=αβ
 
-  if map.panel==1
-    θ=α+pi/2.0
-    ϕ=atan(tan(β)*cos(α))
-    θϕ=Point(θ,ϕ)
-    return map.radius*θϕ2xyz(θϕ)
-  elseif map.panel==2
-    θ=α+pi/2.0
-    ϕ=atan(tan(β)*cos(α))
-    θϕ=Point(θ,ϕ)
-    return map.radius*Ry2⋅θϕ2xyz(θϕ)
-  else
-    return Point(0.0,0.0,0.0)
-  end
+  # if map.panel==1
+  #   θ=α+pi/2.0
+  #   ϕ=atan(tan(β)*cos(α))
+  #   θϕ=Point(θ,ϕ)
+  #   return map.radius*θϕ2xyz(θϕ)
+  # elseif map.panel==2
+  #   θ=α+pi/2.0
+  #   ϕ=atan(tan(β)*cos(α))
+  #   θϕ=Point(θ,ϕ)
+  #   return map.radius*Ry2⋅θϕ2xyz(θϕ)
+  # else
+  #   return Point(0.0,0.0,0.0)
+  # end
 
   if map.panel in 1:4
     θ=α+pi/2.0*(map.panel-1)
