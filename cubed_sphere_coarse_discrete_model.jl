@@ -387,7 +387,8 @@ function run(comm)
   do_on_parts(model) do part, (model,gids)
     writevtk(Triangulation(model),
              "part_$(part)",
-             cellfields=["n"=>Gridap.CellData.get_normal_vector(model)])
+             cellfields=["n"=>Gridap.CellData.get_normal_vector(model),
+                         "lid_to_owner"=>gids.lid_to_owner])
   end
 end
 
