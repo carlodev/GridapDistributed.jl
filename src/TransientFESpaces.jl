@@ -36,7 +36,7 @@ end
 function ODETools.jacobians!(
   A::AbstractMatrix,
   op::TransientFETools.TransientFEOperatorFromWeakForm,
-  t::Real,
+  t::Union{Real, AbstractVector},
   xh::TransientDistributedCellField,
   γ::Tuple{Vararg{Real}},
   cache)
