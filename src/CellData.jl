@@ -75,11 +75,21 @@ end
 
 function Arrays.evaluate!(
   cache,k::Operation,a::DistributedCellField,b::DistributedCellField)
-  fields = map_parts(a.fields,b.fields) do f,g
+    fields = map_parts(a.fields,b.fields) do f,g
     evaluate!(nothing,k,f,g)
   end
   DistributedCellField(fields)
 end
+
+
+function Arrays.evaluate!(
+  cache,k::Operation,a::DistributedCellField,b::DistributedCellField, c::Number, d::Number)
+  fields = map_parts(a.fields,b.fields) do f,g
+    evaluate!(nothing,k,f,g,c,d)
+  end
+  DistributedCellField(fields)
+end
+
 
 function Arrays.evaluate!(
   cache,k::Operation,a::DistributedCellField,b::DistributedCellField,c::DistributedCellField)
@@ -96,6 +106,26 @@ function Arrays.evaluate!(
   end
   DistributedCellField(fields)
 end
+
+function Arrays.evaluate!(
+  cache,k::Operation,a::DistributedCellField,b::DistributedCellField,c::DistributedCellField, n1::Number, n2::Number, n3::Number, n4::Number)
+  fields = map_parts(a.fields,b.fields,c.fields) do f,g,h
+    evaluate!(nothing,k,f,g,h, n1, n2,n3, n4)
+  end
+  DistributedCellField(fields)
+end
+
+function Arrays.evaluate!(
+  cache,k::Operation,a::DistributedCellField,b::DistributedCellField,c::DistributedCellField,d::DistributedCellField, n1::Number, n2::Number, n3::Number, n4::Number)
+  fields = map_parts(a.fields,b.fields,c.fields,d.fields) do f,g,h,j
+    evaluate!(nothing,k,f,g,h,j, n1, n2, n3, n4)
+  end
+  DistributedCellField(fields)
+end
+
+
+
+
 
 function Arrays.evaluate!(cache,k::Operation,a::DistributedCellField,b::Number)
   fields = map_parts(a.fields) do f
@@ -141,6 +171,12 @@ Base.:(∘)(f::Function,g::Tuple{Number,DistributedCellField}) = Operation(f)(g[
 Base.:(∘)(f::Function,g::Tuple{DistributedCellField,Function}) = Operation(f)(g[1],g[2])
 Base.:(∘)(f::Function,g::Tuple{Function,DistributedCellField}) = Operation(f)(g[1],g[2])
 Base.:(∘)(f::Function,g::Tuple{Vararg{DistributedCellField}}) = Operation(f)(g...)
+
+
+Base.:(∘)(f::Function,g::Tuple{DistributedCellField,DistributedCellField,Number,Number}) = Operation(f)(g[1],g[2],g[3],g[4])
+Base.:(∘)(f::Function,g::Tuple{DistributedCellField,DistributedCellField,DistributedCellField, Number,Number, Number,Number}) = Operation(f)(g[1],g[2],g[3],g[4],g[5],g[6], g[7])
+
+Base.:(∘)(f::Function,g::Tuple{DistributedCellField,DistributedCellField,DistributedCellField,DistributedCellField, Number,Number, Number,Number}) = Operation(f)(g[1],g[2],g[3],g[4],g[5],g[6], g[7], g[8])
 
 # Define some of the well known arithmetic ops
 
