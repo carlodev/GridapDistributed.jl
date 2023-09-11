@@ -17,18 +17,10 @@ end
 
 function ODETools.allocate_jacobian(
   op::TransientFETools.TransientFEOperatorFromWeakForm,
-  duh::DistributedCellField,
+  t0::Real,
+  duh::Union{DistributedCellField,DistributedMultiFieldFEFunction},
   cache)
-  _matdata_jacobians = TransientFETools.fill_initial_jacobians(op,duh)
-  matdata = _vcat_distributed_matdata(_matdata_jacobians)
-  allocate_matrix(op.assem_t,matdata)
-end
-
-function ODETools.allocate_jacobian(
-  op::TransientFETools.TransientFEOperatorFromWeakForm,
-  duh::DistributedMultiFieldFEFunction,
-  cache)
-  _matdata_jacobians = TransientFETools.fill_initial_jacobians(op,duh)
+  _matdata_jacobians = TransientFETools.fill_initial_jacobians(op,t0,duh)
   matdata = _vcat_distributed_matdata(_matdata_jacobians)
   allocate_matrix(op.assem_t,matdata)
 end
@@ -47,18 +39,18 @@ function ODETools.jacobians!(
 end
 
 function _vcat_distributed_matdata(_matdata)
-  term_to_cellmat = map_parts(a->a[1],local_views(_matdata[1]))
-  term_to_cellidsrows = map_parts(a->a[2],local_views(_matdata[1]))
-  term_to_cellidscols = map_parts(a->a[3],local_views(_matdata[1]))
+  term_to_cellmat = map(a->a[1],local_views(_matdata[1]))
+  term_to_cellidsrows = map(a->a[2],local_views(_matdata[1]))
+  term_to_cellidscols = map(a->a[3],local_views(_matdata[1]))
   for j in 2:length(_matdata)
-    term_to_cellmat_j = map_parts(a->a[1],local_views(_matdata[j]))
-    term_to_cellidsrows_j = map_parts(a->a[2],local_views(_matdata[j]))
-    term_to_cellidscols_j = map_parts(a->a[3],local_views(_matdata[j]))
-    term_to_cellmat = map_parts((a,b)->vcat(a,b),local_views(term_to_cellmat),local_views(term_to_cellmat_j))
-    term_to_cellidsrows = map_parts((a,b)->vcat(a,b),local_views(term_to_cellidsrows),local_views(term_to_cellidsrows_j))
-    term_to_cellidscols = map_parts((a,b)->vcat(a,b),local_views(term_to_cellidscols),local_views(term_to_cellidscols_j))
+    term_to_cellmat_j = map(a->a[1],local_views(_matdata[j]))
+    term_to_cellidsrows_j = map(a->a[2],local_views(_matdata[j]))
+    term_to_cellidscols_j = map(a->a[3],local_views(_matdata[j]))
+    term_to_cellmat = map((a,b)->vcat(a,b),local_views(term_to_cellmat),local_views(term_to_cellmat_j))
+    term_to_cellidsrows = map((a,b)->vcat(a,b),local_views(term_to_cellidsrows),local_views(term_to_cellidsrows_j))
+    term_to_cellidscols = map((a,b)->vcat(a,b),local_views(term_to_cellidscols),local_views(term_to_cellidscols_j))
   end
-  map_parts( (a,b,c) -> (a,b,c),
+  map( (a,b,c) -> (a,b,c),
     local_views(term_to_cellmat),
     local_views(term_to_cellidsrows),
     local_views(term_to_cellidscols)
